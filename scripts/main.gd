@@ -8,6 +8,7 @@ const RED := Color("#ff5364")
 const GREEN := Color("#49e39a")
 const NAVY := Color("#09111f")
 const PANEL := Color(0.035, 0.065, 0.11, 0.94)
+const MUSTANG_VISUAL := true
 
 var camera: Camera3D
 var car: Node3D
@@ -86,12 +87,15 @@ var smoke: GPUParticles3D
 var hood_pivot: Node3D
 var hood_tween: Tween
 var cabin_glass: Node3D
+var detailed_interior: Node3D
+var interior_occluders: Array[MeshInstance3D] = []
 var roof_mesh: MeshInstance3D
 var radiator_area: Area3D
 var radiator_home := Vector3.ZERO
 var coolant_fill_mesh: MeshInstance3D
 var coolant_puddle: MeshInstance3D
 var dashboard_lights: Array[MeshInstance3D] = []
+var headlight_beams: Array[SpotLight3D] = []
 var indicator_left: Array[MeshInstance3D] = []
 var indicator_right: Array[MeshInstance3D] = []
 var climate_lights: Array[MeshInstance3D] = []
@@ -339,11 +343,26 @@ func build_environment() -> void:
 	var env := Environment.new()
 	env.background_mode = Environment.BG_COLOR
 	env.background_color = Color("#242a2d")
-	env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	var studio_panorama := PanoramaSkyMaterial.new()
+	studio_panorama.panorama = load("res://assets/autoshop_01_2k.hdr") as Texture2D
+	var studio_sky := Sky.new()
+	studio_sky.sky_material = studio_panorama
+	env.sky = studio_sky
+	env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
+	env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
 	env.ambient_light_color = Color("#e3e7e9")
-	env.ambient_light_energy = 0.48
-	env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-	env.glow_enabled = false
+	env.ambient_light_energy = 0.56
+	env.tonemap_mode = Environment.TONE_MAPPER_AGX
+	env.ssao_enabled = true
+	env.ssao_radius = 0.72
+	env.ssao_intensity = 1.45
+	env.ssil_enabled = true
+	env.ssil_radius = 1.7
+	env.ssil_intensity = 0.55
+	env.ssr_enabled = true
+	env.ssr_max_steps = 64
+	env.glow_enabled = true
+	env.glow_intensity = 0.18
 	env.fog_enabled = false
 	world_env.environment = env
 	add_child(world_env)
@@ -351,13 +370,14 @@ func build_environment() -> void:
 	var sun := DirectionalLight3D.new()
 	sun.rotation_degrees = Vector3(-54, -35, 0)
 	sun.light_color = Color("#f1f3f3")
-	sun.light_energy = 0.86
+	sun.light_energy = 0.72
 	sun.shadow_enabled = true
+	sun.directional_shadow_max_distance = 38.0
 	add_child(sun)
 
 	for light_data in [
-		[Vector3(-3, 5, 4), Color("#e7edef"), 1.9],
-		[Vector3(4, 3, -4), Color("#e9e7e2"), 1.4]
+		[Vector3(-3, 5, 4), Color("#e7edef"), 1.65],
+		[Vector3(4, 3, -4), Color("#e9e7e2"), 1.25]
 	]:
 		var lamp := OmniLight3D.new()
 		lamp.position = light_data[0]
@@ -431,10 +451,10 @@ func build_environment() -> void:
 
 	highlight_material = StandardMaterial3D.new()
 	highlight_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	highlight_material.albedo_color = Color(0.2, 0.85, 1.0, 0.24)
+	highlight_material.albedo_color = Color(0.2, 0.85, 1.0, 0.10)
 	highlight_material.emission_enabled = true
 	highlight_material.emission = CYAN
-	highlight_material.emission_energy_multiplier = 1.8
+	highlight_material.emission_energy_multiplier = 0.55
 	highlight_material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 
 
@@ -480,7 +500,7 @@ func build_car() -> void:
 	car.position.y = 0.08
 	add_child(car)
 
-	var paint := make_car_paint(Color("#3e5360"))
+	var paint := make_car_paint(Color("#344a59"))
 	var paint_dark := make_car_paint(Color("#26343d"))
 	var black := make_rubber_material()
 	var metal := make_material(Color("#9ca6ad"), 0.18, 0.94)
@@ -496,70 +516,53 @@ func build_car() -> void:
 		Vector4(2.28, 0.91, 0.43, 1.02), Vector4(2.70, 0.84, 0.31, 0.72)
 	]
 	var body_area := create_loft_part("body", body_sections, Vector3(5.5, 1.05, 2.35), paint, car, 32, true)
-	var body_scene := load("res://assets/sedan_body.glb") as PackedScene
+	var body_scene := load("res://assets/mustang_shell.glb" if MUSTANG_VISUAL else "res://assets/sedan_body.glb") as PackedScene
 	if body_scene:
 		var body_model := body_scene.instantiate()
 		body_area.add_child(body_model)
-		if body_model is MeshInstance3D:
-			(body_model as MeshInstance3D).material_override = paint
-		for mesh in body_model.find_children("*", "MeshInstance3D", true, false):
-			(mesh as MeshInstance3D).material_override = paint
 		(body_area.get_child(0) as MeshInstance3D).visible = false
-	# Lower sill and subtle chrome strip sharpen the silhouette without making it boxy.
-	xray_trim.append(create_visual_box(Vector3(3.25, 0.17, 0.07), Vector3(0.38, 0.55, 1.14), paint_dark, car))
-	xray_trim.append(create_visual_box(Vector3(3.25, 0.17, 0.07), Vector3(0.38, 0.55, -1.14), paint_dark, car))
-	xray_trim.append(create_visual_box(Vector3(3.55, 0.022, 0.025), Vector3(0.38, 1.08, 1.175), metal, car))
-	xray_trim.append(create_visual_box(Vector3(3.55, 0.022, 0.025), Vector3(0.38, 1.08, -1.175), metal, car))
+	# Only compact rocker guards remain outside the sculpted, surface-following body.
+	xray_trim.append(create_visual_box(Vector3(2.7, 0.07, 0.045), Vector3(0.48, 0.57, 0.99), paint_dark, car))
+	xray_trim.append(create_visual_box(Vector3(2.7, 0.07, 0.045), Vector3(0.48, 0.57, -0.99), paint_dark, car))
 
-	# Separate sloping windscreen, rear glass and side panes give the cabin a real sedan profile.
+	# The licensed GT model supplies glass, pillars and roof; the old sedan remains a fallback.
 	cabin_glass = Node3D.new()
 	cabin_glass.name = "CabinGlass"
 	car.add_child(cabin_glass)
-	create_glass_quad(PackedVector3Array([Vector3(-0.38, 1.49, -0.97), Vector3(-0.38, 1.49, 0.97), Vector3(0.12, 2.22, 0.84), Vector3(0.12, 2.22, -0.84)]), glass, cabin_glass)
-	create_glass_quad(PackedVector3Array([Vector3(1.48, 2.22, -0.84), Vector3(1.48, 2.22, 0.84), Vector3(1.98, 1.49, 0.97), Vector3(1.98, 1.49, -0.97)]), glass, cabin_glass)
-	for side in [-1.0, 1.0]:
-		create_glass_quad(PackedVector3Array([Vector3(-0.32, 1.52, side * 0.98), Vector3(0.13, 2.21, side * 0.84), Vector3(0.80, 2.21, side * 0.84), Vector3(0.80, 1.52, side * 0.98)]), glass, cabin_glass)
-		create_glass_quad(PackedVector3Array([Vector3(0.83, 1.52, side * 0.98), Vector3(0.83, 2.21, side * 0.84), Vector3(1.48, 2.21, side * 0.84), Vector3(1.93, 1.52, side * 0.98)]), glass, cabin_glass)
-	var roof_sections: Array[Vector4] = [
-		Vector4(0.04, 2.23, 0.045, 0.83), Vector4(0.21, 2.27, 0.055, 0.88),
-		Vector4(1.31, 2.27, 0.055, 0.88), Vector4(1.55, 2.23, 0.045, 0.83)
-	]
-	roof_mesh = create_loft_visual(roof_sections, paint, car, 24)
-	for side in [-1.0, 1.0]:
-		var edge_z: float = side * 0.88
-		create_pipe(Vector3(-0.36, 1.49, side * 0.98), Vector3(0.12, 2.23, edge_z), Color("#27333a"), 0.045)
-		create_pipe(Vector3(0.80, 1.49, side * 0.98), Vector3(0.80, 2.23, edge_z), Color("#27333a"), 0.04)
-		create_pipe(Vector3(1.96, 1.49, side * 0.98), Vector3(1.48, 2.23, edge_z), Color("#27333a"), 0.045)
-		create_pipe(Vector3(0.12, 2.23, edge_z), Vector3(1.48, 2.23, edge_z), Color("#27333a"), 0.035)
-		create_pipe(Vector3(-0.36, 1.49, side * 0.98), Vector3(1.96, 1.49, side * 0.98), Color("#8e999b"), 0.018)
-		for door_x in [-0.19, 0.90, 1.90]:
-			create_pipe(Vector3(door_x, 0.76, side * 1.172), Vector3(door_x, 1.40, side * 1.172), Color("#192229"), 0.009)
-		for handle_x in [0.38, 1.39]:
-			create_visual_box(Vector3(0.19, 0.035, 0.035), Vector3(handle_x, 1.26, side * 1.184), metal, car)
-	# Front and rear fascias, recessed grille and body-colored bumpers.
-	create_visual_box(Vector3(0.14, 0.34, 1.42), Vector3(-2.70, 0.77, 0), make_material(Color("#070b0e"), 0.64, 0.18), car)
-	create_visual_box(Vector3(0.16, 0.22, 2.04), Vector3(-2.67, 0.56, 0), paint_dark, car)
-	create_visual_box(Vector3(0.16, 0.24, 2.02), Vector3(2.66, 0.60, 0), paint_dark, car)
-	create_visual_box(Vector3(0.15, 0.53, 1.86), Vector3(-2.54, 1.16, 0), paint, car)
-	for side in [-1.0, 1.0]:
-		create_visual_box(Vector3(2.12, 0.15, 0.16), Vector3(-1.33, 1.37, side * 1.02), paint, car)
-	for z in [-0.48, -0.24, 0.0, 0.24, 0.48]:
-		create_visual_box(Vector3(0.035, 0.25, 0.025), Vector3(-2.785, 0.78, z), metal_dark(), car)
+	roof_mesh = MeshInstance3D.new()
+	car.add_child(roof_mesh)
+	if not MUSTANG_VISUAL:
+		create_glass_quad(PackedVector3Array([Vector3(-0.38, 1.49, -0.97), Vector3(-0.38, 1.49, 0.97), Vector3(0.12, 2.22, 0.84), Vector3(0.12, 2.22, -0.84)]), glass, cabin_glass)
+		create_glass_quad(PackedVector3Array([Vector3(1.48, 2.22, -0.84), Vector3(1.48, 2.22, 0.84), Vector3(1.98, 1.49, 0.97), Vector3(1.98, 1.49, -0.97)]), glass, cabin_glass)
+		for side in [-1.0, 1.0]:
+			create_glass_quad(PackedVector3Array([Vector3(-0.32, 1.52, side * 0.98), Vector3(0.13, 2.21, side * 0.84), Vector3(0.80, 2.21, side * 0.84), Vector3(0.80, 1.52, side * 0.98)]), glass, cabin_glass)
+			create_glass_quad(PackedVector3Array([Vector3(0.83, 1.52, side * 0.98), Vector3(0.83, 2.21, side * 0.84), Vector3(1.48, 2.21, side * 0.84), Vector3(1.93, 1.52, side * 0.98)]), glass, cabin_glass)
+		var roof_sections: Array[Vector4] = [
+			Vector4(0.04, 2.23, 0.045, 0.83), Vector4(0.21, 2.27, 0.055, 0.88),
+			Vector4(1.31, 2.27, 0.055, 0.88), Vector4(1.55, 2.23, 0.045, 0.83)
+		]
+		roof_mesh.mesh = make_loft_mesh(roof_sections, 24)
+		roof_mesh.material_override = paint
+		for side in [-1.0, 1.0]:
+			var edge_z: float = side * 0.88
+			create_pipe(Vector3(-0.36, 1.49, side * 0.98), Vector3(0.12, 2.23, edge_z), Color("#27333a"), 0.045)
+			create_pipe(Vector3(0.80, 1.49, side * 0.98), Vector3(0.80, 2.23, edge_z), Color("#27333a"), 0.04)
+			create_pipe(Vector3(1.96, 1.49, side * 0.98), Vector3(1.48, 2.23, edge_z), Color("#27333a"), 0.045)
+			create_pipe(Vector3(0.12, 2.23, edge_z), Vector3(1.48, 2.23, edge_z), Color("#27333a"), 0.035)
+	# The imported GT supplies the exterior bumpers, grille and pressed wheel arches.
 
 	# Hood has a pivot so its movement is visible.
 	hood_pivot = Node3D.new()
 	hood_pivot.name = "HoodPivot"
-	hood_pivot.position = Vector3(-0.28, 1.40, 0)
+	hood_pivot.position = Vector3(-0.87, 1.70, 0) if MUSTANG_VISUAL else Vector3(-0.28, 1.40, 0)
 	car.add_child(hood_pivot)
-	var hood_area := create_box_part("hood", Vector3(2.18, 0.14, 2.04), Vector3(-1.06, 0, 0), paint, hood_pivot)
-	var hood_scene := load("res://assets/sedan_hood.glb") as PackedScene
+	var hood_area := create_box_part("hood", Vector3(1.75, 0.46, 1.90) if MUSTANG_VISUAL else Vector3(2.18, 0.14, 2.04), Vector3(-0.87, -0.22, 0) if MUSTANG_VISUAL else Vector3(-1.06, 0, 0), paint, hood_pivot)
+	var hood_scene := load("res://assets/mustang_hood.glb" if MUSTANG_VISUAL else "res://assets/sedan_hood.glb") as PackedScene
 	if hood_scene:
 		var hood_model := hood_scene.instantiate()
 		hood_area.add_child(hood_model)
-		if hood_model is MeshInstance3D:
-			(hood_model as MeshInstance3D).material_override = paint
-		for mesh in hood_model.find_children("*", "MeshInstance3D", true, false):
-			(mesh as MeshInstance3D).material_override = paint
+		if MUSTANG_VISUAL:
+			hood_model.position = -hood_area.position
 		(hood_area.get_child(0) as MeshInstance3D).visible = false
 	hood_pivot.rotation.z = deg_to_rad(-58)
 
@@ -603,10 +606,17 @@ func build_car() -> void:
 	coolant_puddle.visible = false
 
 	# Wheels, hubs, and brake discs.
-	make_wheel("wheel_fl", Vector3(-1.72, 0.63, 1.15), black, metal)
-	make_wheel("wheel_fr", Vector3(-1.72, 0.63, -1.15), black, metal)
-	make_wheel("wheel_rl", Vector3(1.72, 0.63, 1.15), black, metal)
-	make_wheel("wheel_rr", Vector3(1.72, 0.63, -1.15), black, metal)
+	make_wheel("wheel_fl", Vector3(-1.65, 0.63, 1.0), black, metal)
+	make_wheel("wheel_fr", Vector3(-1.65, 0.63, -1.0), black, metal)
+	make_wheel("wheel_rl", Vector3(1.45, 0.63, 1.0), black, metal)
+	make_wheel("wheel_rr", Vector3(1.45, 0.63, -1.0), black, metal)
+	if MUSTANG_VISUAL:
+		var wheel_scene := load("res://assets/mustang_wheels.glb") as PackedScene
+		if wheel_scene:
+			car.add_child(wheel_scene.instantiate())
+		for wheel_id in ["wheel_fl", "wheel_fr", "wheel_rl", "wheel_rr"]:
+			for mesh in parts[wheel_id].find_children("*", "MeshInstance3D", true, false):
+				(mesh as MeshInstance3D).visible = false
 
 	var tank_mat := make_material(Color("#3a464e"), 0.46, 0.78)
 	create_box_part("fuel_tank", Vector3(0.85, 0.25, 0.46), Vector3(1.08, 0.45, 0.55), tank_mat, car)
@@ -615,7 +625,20 @@ func build_car() -> void:
 	create_pipe(Vector3(-0.38, 0.41, -0.66), Vector3(-0.64, 0.96, -0.66), Color("#5a6266"), 0.023)
 	create_pipe(Vector3(0.8, 0.38, -0.62), Vector3(2.36, 0.38, -0.62), Color("#3e4a52"), 0.07)
 	create_cylinder_part("exhaust", 0.105, 0.46, Vector3(2.67, 0.42, -0.62), metal, car, Vector3(0, 0, PI * 0.5))
-	# Seats, center tunnel and exterior mirrors remain visible through glass.
+	# The original GT cabin supplies the visual details; the existing selectable
+	# learning areas remain in place but their older block-built meshes are hidden.
+	if MUSTANG_VISUAL:
+		var interior_scene := load("res://assets/mustang_interior.glb") as PackedScene
+		if interior_scene:
+			detailed_interior = interior_scene.instantiate()
+			car.add_child(detailed_interior)
+			for mesh in detailed_interior.find_children("*", "MeshInstance3D", true, false):
+				if mesh.name.begins_with("inttop_"):
+					interior_occluders.append(mesh as MeshInstance3D)
+	var pre_cabin_meshes := {}
+	for mesh in car.find_children("*", "MeshInstance3D", true, false):
+		pre_cabin_meshes[mesh.get_instance_id()] = true
+	# The fallback cabin also provides the interactive collision areas.
 	var leather := make_material(Color(0.50, 0.50, 0.50), 0.82, 0.0)
 	leather.albedo_texture = load("res://assets/charcoal_leather.png") as Texture2D
 	for seat_x in [0.35, 1.25]:
@@ -633,12 +656,13 @@ func build_car() -> void:
 			for seam_z in [-0.17, 0.17]:
 				create_visual_box(Vector3(0.035, 0.46, 0.008), Vector3(seat_x + 0.085, 1.51, seat_z + seam_z), make_material(Color("#4b5358"), 0.75, 0.0), car)
 	create_visual_box(Vector3(0.28, 0.34, 1.55), Vector3(-0.02, 1.42, 0), make_material(Color("#111518"), 0.68, 0.08), car, Vector3(0, 0, -0.16))
-	for z in [-1.16, 1.16]:
-		var mirror := create_visual_sphere(0.16, Vector3(-0.03, 1.72, z), paint, car)
-		mirror.scale = Vector3(1.25, 0.62, 0.78)
-	for x in [0.38, 1.38]:
-		for z in [-1.185, 1.185]:
-			create_visual_box(Vector3(0.34, 0.035, 0.025), Vector3(x, 1.40, z), metal, car)
+	if not MUSTANG_VISUAL:
+		for z in [-1.16, 1.16]:
+			var mirror := create_visual_sphere(0.16, Vector3(-0.03, 1.72, z), paint, car)
+			mirror.scale = Vector3(1.25, 0.62, 0.78)
+		for x in [0.38, 1.38]:
+			for z in [-1.185, 1.185]:
+				create_visual_box(Vector3(0.34, 0.035, 0.025), Vector3(x, 1.40, z), metal, car)
 
 	# Steering wheel and dashboard.
 	var steering_area := Area3D.new()
@@ -664,21 +688,42 @@ func build_car() -> void:
 	parts["steering"] = steering_area
 	part_meshes["steering"] = [steer]
 	build_interior_details(leather, black, metal)
+	if MUSTANG_VISUAL:
+		for mesh in car.find_children("*", "MeshInstance3D", true, false):
+			if not pre_cabin_meshes.has(mesh.get_instance_id()):
+				(mesh as MeshInstance3D).visible = false
 
 	# Slim headlamp clusters with a dark housing and subdued projector lenses.
 	for z in [-0.77, 0.77]:
 		var lamp_id := "headlight" if z > 0 else "headlight_aux"
-		create_visual_box(Vector3(0.045, 0.22, 0.49), Vector3(-2.68, 1.02, z), make_material(Color("#141d23"), 0.37, 0.22), car)
+		if not MUSTANG_VISUAL:
+			create_visual_box(Vector3(0.045, 0.22, 0.49), Vector3(-2.68, 1.02, z), make_material(Color("#141d23"), 0.37, 0.22), car)
 		var area := create_box_part(lamp_id, Vector3(0.055, 0.15, 0.43), Vector3(-2.713, 1.02, z), make_material(Color("#c0cbd0"), 0.12, 0.35), car)
 		var lens := area.get_child(0) as MeshInstance3D
 		dashboard_lights.append(lens)
-		create_visual_cylinder(0.055, 0.025, Vector3(-0.031, 0, -0.08), make_material(Color("#ecf1f1"), 0.08, 0.14), area, Vector3(0, 0, PI * 0.5))
+		lens.visible = not MUSTANG_VISUAL
+		if not MUSTANG_VISUAL:
+			create_visual_cylinder(0.055, 0.025, Vector3(-0.031, 0, -0.08), make_material(Color("#ecf1f1"), 0.08, 0.14), area, Vector3(0, 0, PI * 0.5))
 		if lamp_id == "headlight_aux":
 			area.set_meta("part_id", "headlight")
 		parts["headlight"] = area
-	for z in [-0.78, 0.78]:
-		var tail := create_visual_box(Vector3(0.055, 0.16, 0.44), Vector3(2.69, 1.03, z), make_material(Color("#a4252a"), 0.14, 0.17), car)
-		dashboard_lights.append(tail)
+	if MUSTANG_VISUAL:
+		for z in [-0.76, 0.76]:
+			var beam := SpotLight3D.new()
+			beam.position = Vector3(-2.58, 1.15, z)
+			beam.rotation_degrees.y = 90.0
+			beam.light_color = Color("#eef5ff")
+			beam.light_energy = 4.0
+			beam.spot_range = 16.0
+			beam.spot_angle = 28.0
+			beam.shadow_enabled = true
+			beam.visible = false
+			car.add_child(beam)
+			headlight_beams.append(beam)
+	if not MUSTANG_VISUAL:
+		for z in [-0.78, 0.78]:
+			var tail := create_visual_box(Vector3(0.055, 0.16, 0.44), Vector3(2.69, 1.03, z), make_material(Color("#a4252a"), 0.14, 0.17), car)
+			dashboard_lights.append(tail)
 
 	# Engine bay particles.
 	steam = make_particles(Color(0.72, 0.9, 1.0, 0.38), 28, 2.2, Vector3(-1.25, 1.8, 0), 0.08)
@@ -1567,6 +1612,10 @@ func reset_view() -> void:
 		interior_button.text = "INNENRAUM ANSEHEN"
 		cabin_glass.visible = true
 		roof_mesh.visible = true
+		if MUSTANG_VISUAL:
+			parts["body"].visible = true
+			for mesh in interior_occluders:
+				mesh.visible = true
 		set_hood_open(interior_saved_hood_open, false)
 		hood_button.disabled = false
 	orbit_focus = Vector3(0, 1.05, 0)
@@ -1590,6 +1639,10 @@ func toggle_interior_mode() -> void:
 	interior_focus = Vector3(0.88, 1.40, 0)
 	cabin_glass.visible = not interior_mode
 	roof_mesh.visible = not interior_mode
+	if MUSTANG_VISUAL:
+		parts["body"].visible = not interior_mode
+		for mesh in interior_occluders:
+			mesh.visible = not interior_mode
 	if interior_mode:
 		interior_saved_hood_open = hood_open
 		set_hood_open(false, false)
@@ -1785,6 +1838,8 @@ func toggle_xray(force_on := false) -> void:
 			(child as MeshInstance3D).visible = not xray_enabled
 	for trim_mesh in xray_trim:
 		trim_mesh.visible = not xray_enabled
+	if detailed_interior:
+		detailed_interior.visible = not xray_enabled
 	xray_button.text = "RÖNTGEN AN" if xray_enabled else "RÖNTGEN"
 	if selected_id == "body":
 		action_button.text = action_text_for("body")
@@ -1822,8 +1877,12 @@ func animate_wheel(area: Area3D) -> void:
 
 
 func toggle_headlights() -> void:
-	for mesh in dashboard_lights:
-		mesh.visible = not mesh.visible
+	if MUSTANG_VISUAL:
+		for beam in headlight_beams:
+			beam.visible = not beam.visible
+	else:
+		for mesh in dashboard_lights:
+			mesh.visible = not mesh.visible
 	show_toast("Beleuchtung umgeschaltet.", CYAN)
 
 
@@ -2087,7 +2146,7 @@ func make_wheel(id: String, pos: Vector3, tire_mat: Material, metal_mat: Materia
 	var area := Area3D.new()
 	area.name = "Part_" + id
 	area.position = pos
-	area.rotation.x = PI * 0.5
+	area.rotation.x = PI * 0.5 if pos.z > 0.0 else -PI * 0.5
 	area.set_meta("part_id", id)
 	area.set_meta("home_position", pos)
 	area.collision_layer = 2
@@ -2109,8 +2168,8 @@ func make_wheel(id: String, pos: Vector3, tire_mat: Material, metal_mat: Materia
 	tire.material_override = tire_mat
 	area.add_child(tire)
 	# Low-profile road tire, recessed brake disc, alloy rim and five slender spokes.
-	create_visual_cylinder(0.405, 0.20, Vector3.ZERO, make_material(Color("#171b1d"), 0.75, 0.10), area)
-	create_visual_cylinder(0.33, 0.035, Vector3(0, 0.10, 0), make_material(Color("#626a6d"), 0.38, 0.78), area)
+	create_visual_cylinder(0.415, 0.19, Vector3.ZERO, make_material(Color("#171b1d"), 0.87, 0.04), area)
+	create_visual_cylinder(0.325, 0.022, Vector3(0, 0.11, 0), make_material(Color("#545d63"), 0.45, 0.62), area)
 	var rim := MeshInstance3D.new()
 	var rim_mesh := TorusMesh.new()
 	rim_mesh.inner_radius = 0.355
@@ -2121,18 +2180,14 @@ func make_wheel(id: String, pos: Vector3, tire_mat: Material, metal_mat: Materia
 	rim.position.y = 0.13
 	rim.material_override = metal_mat
 	area.add_child(rim)
-	for angle_deg in range(0, 360, 72):
-		var spoke := create_visual_box(Vector3(0.055, 0.045, 0.29), Vector3(0, 0.145, 0.19), metal_mat, area)
+	for angle_deg in range(0, 360, 36):
+		var spoke := create_visual_box(Vector3(0.037, 0.060, 0.29), Vector3(0, 0.16, 0.18), metal_mat, area)
 		spoke.rotation.y = deg_to_rad(angle_deg)
+	for angle_deg in range(0, 360, 72):
 		var angle := deg_to_rad(angle_deg)
-		create_visual_cylinder(0.018, 0.012, Vector3(sin(angle) * 0.11, 0.175, cos(angle) * 0.11), make_material(Color("#2d353a"), 0.45, 0.65), area)
-	create_visual_cylinder(0.105, 0.08, Vector3(0, 0.17, 0), metal_mat, area)
-	create_visual_box(Vector3(0.12, 0.055, 0.17), Vector3(0.26, 0.08, 0), make_car_paint(Color("#672e28")), area)
-	var arch_z := 1.21 if pos.z > 0.0 else -1.21
-	for segment in 16:
-		var angle_a := PI * float(segment) / 16.0
-		var angle_b := PI * float(segment + 1) / 16.0
-		create_pipe(Vector3(pos.x + cos(angle_a) * 0.68, pos.y + sin(angle_a) * 0.68, arch_z), Vector3(pos.x + cos(angle_b) * 0.68, pos.y + sin(angle_b) * 0.68, arch_z), Color("#182026"), 0.018)
+		create_visual_cylinder(0.016, 0.018, Vector3(sin(angle) * 0.11, 0.205, cos(angle) * 0.11), metal_dark(), area)
+	create_visual_cylinder(0.095, 0.07, Vector3(0, 0.195, 0), metal_mat, area)
+	create_visual_box(Vector3(0.095, 0.05, 0.15), Vector3(0.245, 0.125, 0), make_car_paint(Color("#672e28")), area)
 	parts[id] = area
 	part_meshes[id] = [tire]
 

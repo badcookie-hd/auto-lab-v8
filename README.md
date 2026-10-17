@@ -2,12 +2,14 @@
 
 Ein deutschsprachiger 3D-Lernsimulator für die Grundlagen eines Autos, erstellt mit Godot 4.
 
-Die überarbeitete Grafik nutzt eigenständige, abgerundete 3D-Modelle für Karosserie und Haube mit Radausschnitten und offenem Motorraum. Dazu kommen getrennte Scheiben, schlankere Scheinwerfer, Straßenreifen mit Felgen und Bremsen, eine Lederstruktur im Innenraum sowie eine neutral ausgeleuchtete 3D-Werkstatt. Unter der weiter geöffneten Haube sitzt nun ein längs eingebauter V8; darunter führt ein modellierter Hinterrad-Antriebsstrang bis zu den Hinterrädern.
+Die neue Darstellung zeigt ein detailliertes, texturiertes 2005er Mustang-GT-Modell mit beweglicher Haube, Felgen, Leuchten und Innenraum. Godots Forward+-Renderer beleuchtet es mit einer echten Werkstatt-HDRI, Umgebungsverdeckung und Reflexionen. Unter der Haube sitzt weiterhin der interaktive, längs eingebaute V8; der modellierte Hinterrad-Antriebsstrang reicht bis zur Hinterachse.
+
+Die 3D-Karosserie stammt von Ricy und steht unter CC BY 4.0; die HDRI von Poly Haven ist CC0. Vollständige Angaben und Änderungen stehen in [assets/ATTRIBUTION.md](assets/ATTRIBUTION.md). AUTO//LAB ist weder von Ford noch von den Modellautoren unterstützt.
 
 ## Spielen
 
 - `AUTO_LAB.exe` doppelt anklicken, falls du die fertige Windows-Fassung verwendest.
-- Alternativ `project.godot` im Godot Project Manager öffnen und **F6/F5** drücken.
+- Alternativ `project.godot` im Godot Project Manager öffnen und **F6/F5** drücken. Für die neue Grafik ist ein PC mit Vulkan-fähiger GPU empfohlen.
 
 ## Bedienung
 
@@ -27,7 +29,7 @@ Die überarbeitete Grafik nutzt eigenständige, abgerundete 3D-Modelle für Karo
 
 ## Innenraum erkunden
 
-Der Innenraum hat eine eigene dreh- und zoombare Querschnittsansicht. Klicke auf ein sichtbares Detail oder wähle es in der Bauteilliste rechts aus; mit **F** springt die Kamera gezielt dorthin. **G** stellt die Außenansicht wieder her. Beim Wechsel in den Innenraum schließt sich die Haube nur für die Ansicht und nimmt danach ihren vorherigen Zustand wieder an.
+Der Innenraum hat eine eigene dreh- und zoombare Querschnittsansicht. Dabei werden Außenhülle und Dach für freie Sicht ausgeblendet. Klicke auf ein sichtbares Detail oder wähle es in der Bauteilliste rechts aus; mit **F** springt die Kamera gezielt dorthin. **G** stellt die Außenansicht wieder her. Beim Wechsel in den Innenraum schließt sich die Haube nur für die Ansicht und nimmt danach ihren vorherigen Zustand wieder an.
 
 Untersuchen kannst du Kombiinstrument, Startknopf, Blinker- und Wischerhebel, Armaturenbrett, Infotainment-Bildschirm, Klimabedienung, Warnblinker, Gangwahl, Feststellbremse, Becherhalter, Pedale, Fahrersitz mit Kopfstütze, Dreipunktgurt, Türbedienung, Handschuhfach, Innenspiegel, Sonnenblende und Luftdüsen. Blinker, Warnblinker, Gebläse, Wischer und Startknopf haben kleine vorführbare Aktionen.
 
@@ -71,6 +73,6 @@ Die Probefahrt übernimmt den Zustand aus der Werkstatt. Ohne Kühler und Kühlm
 
 ## Technischer Hinweis
 
-Das Auto bleibt eine stilisierte 3D-Darstellung. V8-Baugruppen und Kraftfluss folgen einem realen Grundlayout, aber Maße, Zündfolge, Leitungsführung, Motorsteuerung, Fahrverhalten und Temperatur sind keine technische Berechnung eines konkreten Serienfahrzeugs. Das Spiel ersetzt keine Reparaturanleitung oder Werkstattausbildung.
+Die sichtbare Außenhülle und Kabine sind nun ein detailliertes 3D-Modell. Die interaktiven Motor- und Unterbodenbaugruppen bleiben jedoch ein vereinfachtes Lernmodell, kein maßstabsgetreuer Nachbau des Mustang-Antriebs. Maße, Zündfolge, Leitungsführung, Motorsteuerung, Fahrverhalten und Temperatur sind keine technische Berechnung eines konkreten Serienfahrzeugs. Das Spiel ersetzt keine Reparaturanleitung oder Werkstattausbildung.
 
-Karosserie und Haube liegen als GLB-Dateien unter `assets/` und können mit Blender 5+ aus `tools/build_body.py` neu erzeugt werden. Die Lederstruktur ist eine für dieses Projekt generierte Bilddatei. Trotz der überarbeiteten Form ist das Spiel keine fotorealistische Darstellung eines konkreten Automodells.
+Die alten, selbst erzeugten Limousinenmodelle bleiben als Fallback erhalten und können mit Blender 5+ aus `tools/build_body.py` neu gebaut werden. `tools/prepare_mustang.py` trennt das lizenzierte Ausgangsmodell in Karosserie, Haube, Räder und Innenraum. Die Lederstruktur des Fallbacks ist eine für dieses Projekt generierte Bilddatei. Für optische Qualität und Details ist der neue Aufbau deutlich besser, aber „hyperrealistisch“ im Sinn einer Filmproduktion ist insbesondere die interaktive Technik noch nicht.
